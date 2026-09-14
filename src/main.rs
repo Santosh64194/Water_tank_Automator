@@ -4,8 +4,8 @@ mod enum_and_transition;
 mod structure;
 
 trait PumpHardware {
-    fn turnon(&mut self);
-    fn turnoff(&mut self);
+    fn turn_on(&mut self);
+    fn turn_off(&mut self);
 }
 
 struct FakePumpHardware {
@@ -13,11 +13,11 @@ struct FakePumpHardware {
 }
 
 impl PumpHardware for FakePumpHardware {
-    fn turnoff(&mut self) {
+    fn turn_off(&mut self) {
         self.pump_is_on = false;
     }
 
-    fn turnon(&mut self) {
+    fn turn_on(&mut self) {
         self.pump_is_on = true;
     }
 }
@@ -25,11 +25,11 @@ impl PumpHardware for FakePumpHardware {
 fn apply_output<H: PumpHardware>(output: enum_and_transition::PumpOutput, hardware: &mut H) {
     match output {
         PumpOutput::TurnOn => {
-            hardware.turnon();
+            hardware.turn_on();
         }
 
         PumpOutput::TurnOff => {
-            hardware.turnoff();
+            hardware.turn_off();
         }
     }
 }
@@ -37,11 +37,6 @@ fn apply_output<H: PumpHardware>(output: enum_and_transition::PumpOutput, hardwa
 fn main() {
     let mut controller = structure::PumpController::new();
 
-    let mut hardware = FakePumpHardware { pump_is_on: false };
-    apply_output(PumpOutput::TurnOn, &mut hardware);
-
-    println!("{}", hardware.pump_is_on);
-
-    apply_output(PumpOutput::TurnOff, &mut hardware);
-    println!("{}", hardware.pump_is_on);
+    controller.record_valid_packet(4000);
+    println!("{:?}", controller.observe_last_valid_packet());
 }

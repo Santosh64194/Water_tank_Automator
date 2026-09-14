@@ -1,11 +1,12 @@
 use crate::enum_and_transition::{
-    self, FaultReason, PumpEvent, PumpOutput, PumpState, pumpstate_transition,
+    self, FaultReason::{self, CommTimeOut}, PumpEvent, PumpOutput, PumpState, pumpstate_transition,
 };
 
 #[derive(Debug)]
 pub struct PumpController {
     state: enum_and_transition::PumpState,
     faultreason: Option<enum_and_transition::FaultReason>,
+    last_valid_packet_ms: Option<u32>,
     //something
 }
 
@@ -14,6 +15,7 @@ impl PumpController {
         PumpController {
             state: PumpState::Off,
             faultreason: None,
+            last_valid_packet_ms: None,
         }
     }
 
@@ -40,10 +42,7 @@ impl PumpController {
                 match self.state {
                     PumpState::Off => PumpOutput::TurnOff,
                     PumpState::Running => PumpOutput::TurnOn,
-                    PumpState::Fault => {
-                        //sets the fault reason
-                        PumpOutput::TurnOff
-                    }
+                    PumpState::Fault => PumpOutput::TurnOff,
                 }
             }
         }
@@ -53,7 +52,47 @@ impl PumpController {
         self.state
     }
 
-    pub fn faultreason(&self) -> &Option<enum_and_transition::FaultReason> {
-        &self.faultreason
+    pub fn faultreason(&self) -> Option<enum_and_transition::FaultReason> {
+        self.faultreason
     }
+
+    pub fn record_valid_packet(&mut self, current_ms: u32) {
+        self.last_valid_packet_ms = Some(current_ms);
+    }
+
+    pub fn observe_last_valid_packet(&self) -> Option<u32> {
+        self.last_valid_packet_ms
+    }
+
+    pub fn check_comm_timeout(&self, current_ms: u32) -> bool {
+        const COMM_TIME_OUT_MS: u32 = 10_000;
+        match self.last_valid_packet_ms {
+            Some(value) => {
+                let elapsed_time = current_ms - value;
+                // if elapsed_time > COMM_TIME_OUT_MS {
+                //     true
+                // } else {
+                //     false
+                // }
+                elapsed_time > COMM_TIME_OUT_MS
+            },
+
+            None => false
+        }
+    }
+
+    pub fn handle_comm_timeout(&mut self, current_ms: u32) -> PumpOutput{
+        if (self.check_comm_timeout(current_ms)) {
+			let event = PumpEvent::Fault { reason_of_fault: CommTimeOut };
+			self.handle_event(event)
+        } else {
+			match self.state {
+				PumpState::Off => PumpOutput::TurnOff,
+				PumpState::Running => PumpOutput::TurnOn,
+				PumpState::Fault => PumpOutput::TurnOff
+			}
+		}
+    }
+
 }
+

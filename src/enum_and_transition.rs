@@ -24,7 +24,7 @@ pub enum TankEvent {
     Reset,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum FaultReason {
     CommTimeOut,
     TankSensorFault,
