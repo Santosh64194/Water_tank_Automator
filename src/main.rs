@@ -1,7 +1,8 @@
-use crate::enum_and_transition::{PumpEvent, PumpOutput};
+use crate::{Lora::*, enum_and_transition::*, pump_controller::PumpController};
 
+mod Lora;
 mod enum_and_transition;
-mod structure;
+mod pump_controller;
 
 trait PumpHardware {
     fn turn_on(&mut self);
@@ -35,8 +36,5 @@ fn apply_output<H: PumpHardware>(output: enum_and_transition::PumpOutput, hardwa
 }
 
 fn main() {
-    let mut controller = structure::PumpController::new();
 
-    controller.record_valid_packet(4000);
-    println!("{:?}", controller.observe_last_valid_packet());
 }

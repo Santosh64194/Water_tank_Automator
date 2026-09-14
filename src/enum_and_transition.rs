@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum TankLevel {
     Unknown,
     Low,
@@ -7,7 +7,17 @@ pub enum TankLevel {
     Fault,
 }
 
-#[derive(Debug, Copy, Clone)]
+pub fn tanklevel_to_bytes(level: TankLevel) -> u8 {
+    match level {
+        TankLevel::Unknown => 0,
+        TankLevel::Low => 1,
+        TankLevel::Normal => 2,
+        TankLevel::Full => 3,
+        TankLevel::Fault => 4,
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum PumpState {
     Off,
     Running,
