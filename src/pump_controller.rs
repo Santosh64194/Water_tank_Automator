@@ -1,7 +1,7 @@
 use crate::enum_and_transition::{
     self,
     FaultReason::{self, CommTimeOut, MaximumRunTime},
-    PumpEvent, PumpOutput, PumpState, pumpstate_transition,
+    PumpEvent, PumpOutput, PumpState, TankLevel, pumpstate_transition,
 };
 
 pub trait PumpHardware {
@@ -11,6 +11,12 @@ pub trait PumpHardware {
 
 pub struct FakePumpHardware {
     pub pump_is_on: bool,
+}
+
+impl Default for FakePumpHardware {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FakePumpHardware {
@@ -50,6 +56,12 @@ pub struct PumpController {
     //something
 }
 
+impl Default for PumpController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PumpController {
     pub fn new() -> Self {
         PumpController {
@@ -78,11 +90,22 @@ impl PumpController {
                 self.state = pumpstate_transition(self.state, event);
                 self.faultreason = None;
                 self.pump_started_ms = None;
+                self.last_valid_packet_ms = None;
                 PumpOutput::TurnOff
             }
 
             _ => {
+                if let PumpEvent::TankLevel {
+                    level_of_tank: TankLevel::Fault,
+                } = event
+                {
+                    self.set_fault(FaultReason::TankSensorFault);
+                    self.pump_started_ms = None;
+                    return PumpOutput::TurnOff;
+                }
+
                 self.state = pumpstate_transition(self.state, event);
+
                 if old_state == PumpState::Off && self.state == PumpState::Running {
                     self.record_pump_start(current_ms);
                 }
@@ -90,6 +113,7 @@ impl PumpController {
                 if old_state == PumpState::Running && self.state == PumpState::Off {
                     self.pump_started_ms = None;
                 }
+
                 match self.state {
                     PumpState::Off => PumpOutput::TurnOff,
                     PumpState::Running => PumpOutput::TurnOn,

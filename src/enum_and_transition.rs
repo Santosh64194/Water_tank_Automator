@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TankLevel {
     Unknown,
     Low,
@@ -34,7 +34,7 @@ pub enum TankEvent {
     Reset,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum FaultReason {
     CommTimeOut,
     TankSensorFault,
@@ -48,7 +48,7 @@ pub enum PumpEvent {
     Reset,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PumpOutput {
     TurnOn,
     TurnOff,

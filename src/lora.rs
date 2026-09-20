@@ -11,6 +11,13 @@ pub struct FakeLoraHardware {
     pub last_packet: Option<u32>,
     pub last_ack: Option<u32>,
 }
+
+impl Default for FakeLoraHardware {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FakeLoraHardware {
     pub fn new() -> Self {
         FakeLoraHardware {
@@ -60,12 +67,18 @@ pub fn create_ack(packet: &LoraPacket) -> AckPacket {
 }
 
 // ============================================================
-// ACCEPTED PACKET
+// Possible Packet Results
 // ============================================================
 
-pub struct AcceptedPacket {
-    pub tank_level: TankLevel,
-    pub ack: AckPacket,
+pub enum PacketResult {
+    Accepted {
+        tanklevel: TankLevel,
+        ack: AckPacket,
+    },
+    Duplicate {
+        ack: AckPacket,
+    },
+    Invalid,
 }
 
 // ============================================================
@@ -74,6 +87,12 @@ pub struct AcceptedPacket {
 
 pub struct CommState {
     pub last_received_seq: Option<u32>,
+}
+
+impl Default for CommState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CommState {
@@ -89,43 +108,40 @@ impl CommState {
         difference != 0 && difference < (1u32 << 31)
     }
 
-    fn accept_sequence(&mut self, seq: u32) -> bool {
+    pub fn accept_packet(&mut self, packet: LoraPacket) -> PacketResult {
+        // 1. CRC check
+        if !Self::verify_crc(&packet) {
+            return PacketResult::Invalid;
+        }
+
+        // 2. Check sequence
         match self.last_received_seq {
             None => {
-                self.last_received_seq = Some(seq);
-                true
+                self.last_received_seq = Some(packet.seq);
+
+                PacketResult::Accepted {
+                    tanklevel: packet.tank_level,
+                    ack: create_ack(&packet),
+                }
             }
 
             Some(old_seq) => {
-                if Self::is_newer_sequence(seq, old_seq) {
-                    self.last_received_seq = Some(seq);
-                    true
+                if Self::is_newer_sequence(packet.seq, old_seq) {
+                    self.last_received_seq = Some(packet.seq);
+
+                    PacketResult::Accepted {
+                        tanklevel: packet.tank_level,
+                        ack: create_ack(&packet),
+                    }
+                } else if packet.seq == old_seq {
+                    PacketResult::Duplicate {
+                        ack: create_ack(&packet),
+                    }
                 } else {
-                    false
+                    PacketResult::Invalid
                 }
             }
         }
-    }
-
-    pub fn accept_packet(&mut self, packet: LoraPacket) -> Option<AcceptedPacket> {
-        // 1. Check CRC
-        if !Self::verify_crc(&packet) {
-            return None;
-        }
-
-        // 2. Check sequence number
-        if !self.accept_sequence(packet.seq) {
-            return None;
-        }
-
-        // 3. Create ACK
-        let ack = create_ack(&packet);
-
-        // 4. Return both tank information and ACK
-        Some(AcceptedPacket {
-            tank_level: packet.tank_level,
-            ack,
-        })
     }
 
     // ========================================================
@@ -182,12 +198,17 @@ impl CommState {
         hardware: &mut H,
     ) -> Option<TankLevel> {
         match self.accept_packet(packet) {
-            Some(accepted) => {
-                hardware.send_ack(&accepted.ack);
-                Some(accepted.tank_level)
+            PacketResult::Accepted { tanklevel, ack } => {
+                hardware.send_ack(&ack);
+                Some(tanklevel)
             }
 
-            None => None,
+            PacketResult::Duplicate { ack } => {
+                hardware.send_ack(&ack);
+                None
+            }
+
+            PacketResult::Invalid => None,
         }
     }
 }
@@ -208,6 +229,12 @@ pub struct LoraSender {
     pub pending_packet: Option<LoraPacket>,
     pub sent_at_ms: Option<u32>,
     pub retry_count: u8,
+}
+
+impl Default for LoraSender {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LoraSender {
