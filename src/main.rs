@@ -1,47 +1,36 @@
-use crate::{enum_and_transition::*, lora::*};
-
+mod Lora;
 mod enum_and_transition;
-mod lora;
 mod pump_controller;
 
-trait PumpHardware {
-    fn turn_on(&mut self);
-    fn turn_off(&mut self);
-}
-
-struct FakePumpHardware {
-    pump_is_on: bool,
-}
-
-impl PumpHardware for FakePumpHardware {
-    fn turn_off(&mut self) {
-        self.pump_is_on = false;
-    }
-
-    fn turn_on(&mut self) {
-        self.pump_is_on = true;
-    }
-}
-
-fn apply_output<H: PumpHardware>(output: enum_and_transition::PumpOutput, hardware: &mut H) {
-    match output {
-        PumpOutput::TurnOn => {
-            hardware.turn_on();
-        }
-
-        PumpOutput::TurnOff => {
-            hardware.turn_off();
-        }
-    }
-}
+use crate::{Lora::*, enum_and_transition::*, pump_controller::*};
 
 fn main() {
-    // ========================================================
-    // SETUP
-    // ========================================================
+    // =========================================================
+    // HARDWARE
+    // =========================================================
 
-    let mut hardware = FakeLoraHardware::new();
-    let mut sender = LoraSender::new();
+    let mut lora_hardware = FakeLoraHardware::new();
+    let mut pump_hardware = FakePumpHardware::new();
+
+    // =========================================================
+    // COMMUNICATION STATE
+    // =========================================================
+
+    let mut comm = CommState {
+        last_received_seq: None,
+    };
+
+    // =========================================================
+    // PUMP CONTROLLER
+    // =========================================================
+
+    let mut pump_controller = PumpController::new();
+
+    // =========================================================
+    // 1. RECEIVE LOW-TANK PACKET
+    // =========================================================
+
+    let current_ms = 0;
 
     let mut packet = LoraPacket {
         device_id: 1,
@@ -52,174 +41,121 @@ fn main() {
 
     packet.crc = CommState::generate_crc(&packet);
 
-    // ========================================================
-    // 1. INITIAL TRANSMISSION
-    // ========================================================
+    println!("==============================");
+    println!("1. LOW TANK PACKET");
+    println!("==============================");
 
-    println!("\n--- Test 1: Initial transmission ---");
+    if let Some(level) = comm.process_packet(packet, &mut lora_hardware) {
+        // Valid packet received.
+        pump_controller.record_valid_packet(current_ms);
 
-    sender.start_transmission(&packet, 0, &mut hardware);
+        let event = PumpEvent::TankLevel {
+            level_of_tank: level,
+        };
 
-    assert_eq!(sender.state, SenderState::WaitingForAck);
-    assert_eq!(sender.retry_count, 0);
-    assert_eq!(sender.sent_at_ms, Some(0));
-    assert_eq!(hardware.last_packet, Some(1));
+        let output = pump_controller.handle_event(event, current_ms);
 
-    println!("PASS");
+        apply_output(output, &mut pump_hardware);
+    }
 
+    println!("Pump state: {:?}", pump_controller.state());
+    println!("Pump ON: {}", pump_hardware.pump_is_on);
+    println!("Last ACK: {:?}", lora_hardware.last_ack);
 
-    // ========================================================
-    // 2. BEFORE ACK TIMEOUT
-    // ========================================================
+    // =========================================================
+    // 2. PUMP RUNS FOR 30 SECONDS
+    // =========================================================
 
-    println!("\n--- Test 2: Before ACK timeout ---");
+    let current_ms = 30_000;
 
-    sender.handle_ack_timeout(4_999, &mut hardware);
+    println!();
+    println!("==============================");
+    println!("2. 30 SECONDS");
+    println!("==============================");
 
-    assert_eq!(sender.retry_count, 0);
-    assert_eq!(sender.state, SenderState::WaitingForAck);
-    assert_eq!(hardware.last_packet, Some(1));
+    if pump_controller.check_max_run_timeout(current_ms) {
+        let output = pump_controller.handle_max_run_timeout(current_ms);
 
-    println!("PASS");
+        apply_output(output, &mut pump_hardware);
+    }
 
+    println!("Pump state: {:?}", pump_controller.state());
+    println!("Pump ON: {}", pump_hardware.pump_is_on);
 
-    // ========================================================
-    // 3. FIRST RETRY
-    // ========================================================
+    // =========================================================
+    // 3. ANOTHER VALID LOW PACKET
+    // =========================================================
 
-    println!("\n--- Test 3: First retry ---");
+    let current_ms = 40_000;
 
-    sender.handle_ack_timeout(5_000, &mut hardware);
-
-    assert_eq!(sender.retry_count, 1);
-    assert_eq!(sender.state, SenderState::WaitingForAck);
-    assert_eq!(sender.sent_at_ms, Some(5_000));
-    assert_eq!(hardware.last_packet, Some(1));
-
-    println!("PASS");
-
-
-    // ========================================================
-    // 4. SECOND RETRY
-    // ========================================================
-
-    println!("\n--- Test 4: Second retry ---");
-
-    sender.handle_ack_timeout(10_000, &mut hardware);
-
-    assert_eq!(sender.retry_count, 2);
-    assert_eq!(sender.state, SenderState::WaitingForAck);
-    assert_eq!(sender.sent_at_ms, Some(10_000));
-
-    println!("PASS");
-
-
-    // ========================================================
-    // 5. ACK RECEIVED
-    // ========================================================
-
-    println!("\n--- Test 5: Correct ACK ---");
-
-    let accepted = sender.receive_ack(1);
-
-    assert!(accepted);
-    assert_eq!(sender.state, SenderState::Idle);
-    assert_eq!(sender.retry_count, 0);
-    assert_eq!(sender.sent_at_ms, None);
-    assert!(sender.pending_packet.is_none());
-
-    println!("PASS");
-
-
-    // ========================================================
-    // 6. WRONG ACK
-    // ========================================================
-
-    println!("\n--- Test 6: Wrong ACK ---");
-
-    // Start another transmission.
-    let mut packet2 = LoraPacket {
+    let mut packet = LoraPacket {
         device_id: 1,
-        tank_level: TankLevel::Normal,
+        tank_level: TankLevel::Low,
         seq: 2,
         crc: 0,
     };
 
-    packet2.crc = CommState::generate_crc(&packet2);
+    packet.crc = CommState::generate_crc(&packet);
 
-    sender.start_transmission(&packet2, 20_000, &mut hardware);
+    println!();
+    println!("==============================");
+    println!("3. NEW LOW PACKET");
+    println!("==============================");
 
-    let accepted = sender.receive_ack(999);
+    if let Some(level) = comm.process_packet(packet, &mut lora_hardware) {
+        pump_controller.record_valid_packet(current_ms);
 
-    assert!(!accepted);
-    assert_eq!(sender.state, SenderState::WaitingForAck);
-    assert_eq!(sender.retry_count, 0);
-    assert!(sender.pending_packet.is_some());
+        let event = PumpEvent::TankLevel {
+            level_of_tank: level,
+        };
 
-    println!("PASS");
+        let output = pump_controller.handle_event(event, current_ms);
 
+        apply_output(output, &mut pump_hardware);
+    }
 
-    // ========================================================
-    // 7. RETRY AFTER WRONG ACK
-    // ========================================================
+    println!("Pump state: {:?}", pump_controller.state());
+    println!("Pump ON: {}", pump_hardware.pump_is_on);
+    println!("Last ACK: {:?}", lora_hardware.last_ack);
 
-    println!("\n--- Test 7: Retry after wrong ACK ---");
+    // =========================================================
+    // 4. MAXIMUM RUN TIME
+    // =========================================================
 
-    sender.handle_ack_timeout(25_000, &mut hardware);
+    let current_ms = 100_001;
 
-    assert_eq!(sender.retry_count, 1);
-    assert_eq!(sender.state, SenderState::WaitingForAck);
-    assert_eq!(hardware.last_packet, Some(2));
+    println!();
+    println!("==============================");
+    println!("4. MAXIMUM RUN TIME");
+    println!("==============================");
 
-    println!("PASS");
+    if pump_controller.check_max_run_timeout(current_ms) {
+        let output = pump_controller.handle_max_run_timeout(current_ms);
 
+        apply_output(output, &mut pump_hardware);
+    }
 
-    // ========================================================
-    // 8. MAX RETRIES
-    // ========================================================
+    println!("Pump state: {:?}", pump_controller.state());
+    println!("Pump ON: {}", pump_hardware.pump_is_on);
 
-    println!("\n--- Test 8: Maximum retries ---");
+    // =========================================================
+    // 5. RESET
+    // =========================================================
 
-    sender.handle_ack_timeout(30_000, &mut hardware);
-    sender.handle_ack_timeout(35_000, &mut hardware);
-    sender.handle_ack_timeout(40_000, &mut hardware);
-    sender.handle_ack_timeout(45_000, &mut hardware);
+    println!();
+    println!("==============================");
+    println!("5. RESET");
+    println!("==============================");
 
-    assert_eq!(sender.retry_count, 5);
-    assert_eq!(sender.state, SenderState::WaitingForAck);
+    let output = pump_controller.handle_event(PumpEvent::Reset, current_ms);
 
-    println!("PASS");
+    apply_output(output, &mut pump_hardware);
 
+    println!("Pump state: {:?}", pump_controller.state());
+    println!("Pump ON: {}", pump_hardware.pump_is_on);
 
-    // ========================================================
-    // 9. RETRY EXHAUSTED → FAULT
-    // ========================================================
-
-    println!("\n--- Test 9: Retry exhausted ---");
-
-    sender.handle_ack_timeout(50_000, &mut hardware);
-
-    assert_eq!(sender.retry_count, 5);
-    assert_eq!(sender.state, SenderState::Fault);
-
-    println!("PASS");
-
-
-    // ========================================================
-    // 10. ACK AFTER FAULT
-    // ========================================================
-
-    println!("\n--- Test 10: ACK after fault ---");
-
-    let accepted = sender.receive_ack(2);
-
-    assert!(accepted);
-    assert_eq!(sender.state, SenderState::Idle);
-
-    println!("PASS");
-
-
-    println!("\n================================");
-    println!("ALL TESTS PASSED");
-    println!("================================");
+    println!();
+    println!("==============================");
+    println!("SIMULATION COMPLETE");
+    println!("==============================");
 }

@@ -4,6 +4,43 @@ use crate::enum_and_transition::{
     PumpEvent, PumpOutput, PumpState, pumpstate_transition,
 };
 
+pub trait PumpHardware {
+    fn turn_on(&mut self);
+    fn turn_off(&mut self);
+}
+
+pub struct FakePumpHardware {
+    pub pump_is_on: bool,
+}
+
+impl FakePumpHardware {
+    pub fn new() -> Self {
+        FakePumpHardware { pump_is_on: false }
+    }
+}
+
+impl PumpHardware for FakePumpHardware {
+    fn turn_on(&mut self) {
+        self.pump_is_on = true;
+    }
+
+    fn turn_off(&mut self) {
+        self.pump_is_on = false;
+    }
+}
+
+pub fn apply_output<H: PumpHardware>(output: PumpOutput, hardware: &mut H) {
+    match output {
+        PumpOutput::TurnOn => {
+            hardware.turn_on();
+        }
+
+        PumpOutput::TurnOff => {
+            hardware.turn_off();
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct PumpController {
     state: enum_and_transition::PumpState,

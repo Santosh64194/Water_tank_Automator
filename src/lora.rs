@@ -4,15 +4,19 @@ use crate::enum_and_transition::TankLevel;
 
 pub trait LoraHardware {
     fn send(&mut self, packet: &LoraPacket);
+    fn send_ack(&mut self, ack: &AckPacket);
 }
 
 pub struct FakeLoraHardware {
     pub last_packet: Option<u32>,
+    pub last_ack: Option<u32>,
 }
-
 impl FakeLoraHardware {
     pub fn new() -> Self {
-        FakeLoraHardware { last_packet: None }
+        FakeLoraHardware {
+            last_packet: None,
+            last_ack: None,
+        }
     }
 }
 
@@ -21,6 +25,12 @@ impl LoraHardware for FakeLoraHardware {
         self.last_packet = Some(packet.seq);
 
         println!("Fake LoRa: sent packet with sequence {}", packet.seq);
+    }
+
+    fn send_ack(&mut self, ack: &AckPacket) {
+        self.last_ack = Some(ack.seq);
+
+        println!("Fake LoRa: sent ACK for sequence {}", ack.seq);
     }
 }
 
@@ -165,6 +175,21 @@ impl CommState {
 
         calculated_crc == packet.crc
     }
+
+    pub fn process_packet<H: LoraHardware>(
+        &mut self,
+        packet: LoraPacket,
+        hardware: &mut H,
+    ) -> Option<TankLevel> {
+        match self.accept_packet(packet) {
+            Some(accepted) => {
+                hardware.send_ack(&accepted.ack);
+                Some(accepted.tank_level)
+            }
+
+            None => None,
+        }
+    }
 }
 
 // ============================================================
@@ -220,7 +245,7 @@ impl LoraSender {
     pub fn receive_ack(&mut self, ack_seq: u32) -> bool {
         match self.pending_packet.as_ref() {
             Some(packet) => {
-                if ack_seq != packet.seq {
+                if ack_seq != packet.seq || self.state != SenderState::WaitingForAck {
                     return false;
                 }
 
