@@ -36,7 +36,6 @@ pub enum TankEvent {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum FaultReason {
-    CommTimeOut,
     TankSensorFault,
     MaximumRunTime,
 }
